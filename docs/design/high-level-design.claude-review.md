@@ -4,7 +4,7 @@ This document outlines the high-level design of the `voice-be` application, a se
 
 ## 1. System Overview
 
-`voice-be` is a real-time voice communication application built using Flask, Flask-SocketIO, and Gevent. It utilizes WebSockets for bidirectional communication between clients and the server. The application facilitates the creation of rooms where users can join and exchange voice data.  The current implementation lacks a persistent data store (database).
+`voice-be` is a real-time voice communication application built using Flask, Flask-SocketIO, and Gevent. It utilizes WebSockets for bidirectional communication between clients and the server.  The application allows users to join rooms and exchange voice data within those rooms.  The current implementation lacks a persistent data store (database).
 
 ## 2. Architecture
 
@@ -12,108 +12,93 @@ The system follows a client-server architecture.
 
 ```mermaid
 graph LR
-    A[Client] --> B(WebSocket);
-    B --> C[Server (Flask/SocketIO)];
-    C --> B;
-    subgraph "Server Components"
-        C --> D(Flask Application);
-        D --> E(SocketIO);
-        E --> F(Gevent);
+    A[Client] --> B(Server);
+    B --> A;
+    subgraph "Server"
+        C[Flask Application];
+        D[SocketIO];
+        E[Gevent];
     end
 ```
 
-* **Client:**  (Not detailed in provided code)  A voice client application (likely a mobile or web app) responsible for capturing audio, encoding it, and sending it to the server via WebSockets. It also receives audio data from the server.
-* **Server:** A Flask application using Flask-SocketIO for handling WebSocket connections. Gevent is used for asynchronous I/O operations to handle multiple concurrent connections efficiently.
-* **WebSocket:**  The communication channel between the client and the server for real-time data transfer.
+* **Client:**  (Not defined in the provided code)  This would be a separate application (likely a mobile or web app) responsible for capturing audio, encoding it, sending it to the server, and receiving audio from other clients in the same room.
+* **Server:**  The server is implemented using Flask, leveraging Flask-SocketIO for real-time communication and Gevent for asynchronous handling of multiple connections.
 
 ## 3. Component Design
 
-### 3.1 Server (Flask Application)
+### 3.1 Flask Application (`api/server.py`)
 
-* **Technology:** Python, Flask, Flask-SocketIO, Gevent
-* **Functionality:**
-    * Manages WebSocket connections.
-    * Handles client events (`join`, `data`).
-    * Routes data to appropriate rooms.
-    * Provides error handling.
-* **Key Classes/Modules:**
-    * `server.py`: Contains the main Flask application and SocketIO setup.  Handles routing of WebSocket events.
-* **Dependencies:** Flask, Flask-SocketIO, Gevent, Gevent-WebSocket
+The Flask application acts as the core of the server. It handles WebSocket connections, manages rooms, and routes messages.
 
+* **`join` event handler:**  Handles user joining a room.  It adds the user to the room using SocketIO's `join_room` function and broadcasts a 'ready' message to other users in the room.
+* **`data` event handler:** Handles the transfer of voice data between clients within a room.  It receives data, logs it, and broadcasts it to all other users in the room.
+* **`default_error_handler`:** A basic error handler that prints errors and stops the SocketIO server.  More robust error handling is needed for production.
 
-### 3.2 SocketIO Integration
+### 3.2 SocketIO
 
-* **Technology:** Flask-SocketIO
-* **Functionality:** Enables real-time, bidirectional communication between the client and server using WebSockets.  Handles room management and targeted message delivery.
-* **Key Events:**
-    * `join`: Client joins a room.
-    * `data`: Client sends voice data.
-    * `ready`: Server signals to other clients in the room that a new user has joined.
-    * `data`: Server broadcasts received voice data to other clients in the room.
+Flask-SocketIO is used to manage WebSocket connections and handle real-time communication.  It provides the mechanisms for broadcasting messages to specific rooms.
 
+### 3.3 Gevent
 
-### 3.3 Gevent Integration
-
-* **Technology:** Gevent
-* **Functionality:** Provides asynchronous I/O capabilities, allowing the server to handle multiple concurrent WebSocket connections efficiently without blocking.
-
+Gevent is used for asynchronous I/O, allowing the server to handle multiple concurrent connections efficiently.
 
 ## 4. API Documentation
 
-The API is implicitly defined through the SocketIO events:
+The API is event-driven through SocketIO.
 
-| Event Name | Direction | Data Payload | Description |
-|---|---|---|---|
-| `join` | Client to Server | `{"username": string, "room": string}` | Client joins a room. |
-| `ready` | Server to Client | `{"username": string}` | Notifies clients in a room that a new user has joined. |
-| `data` | Client to Server | `{"username": string, "room": string, "data": binary data}` | Client sends voice data. |
-| `data` | Server to Client | `binary data` | Server broadcasts received voice data. |
+| Event      | Direction | Data                               | Description                                         |
+|------------|-----------|------------------------------------|-----------------------------------------------------|
+| `join`     | Client -> Server | `{"username": string, "room": string}` | User joins a room.                               |
+| `ready`    | Server -> Client | `{"username": string}`             | Notifies clients in a room that a new user has joined.|
+| `data`     | Client -> Server | `{"username": string, "room": string, "data": binary}` | Client sends voice data.                         |
+| `data`     | Server -> Client | `binary`                            | Server broadcasts voice data to other clients in the room.|
 
 
 ## 5. Database Schema and Data Models
 
-The current implementation lacks a persistent database.  This is a significant limitation.  A database is needed to store user information, room details, and potentially recording history.  A suitable database (e.g., PostgreSQL, MongoDB) should be integrated.
+The current implementation lacks a database.  For a production-ready system, a database is crucial for storing user information, room details, and potentially recording voice data.  A suitable database could be PostgreSQL or MongoDB.
 
-**Proposed Database Schema (PostgreSQL Example):**
+**Proposed Database Schema (PostgreSQL example):**
 
-* **Users Table:**
+* **Users table:**
     * `id` (SERIAL PRIMARY KEY)
     * `username` (VARCHAR(255) UNIQUE NOT NULL)
     * ... other user details ...
 
-* **Rooms Table:**
+* **Rooms table:**
     * `id` (SERIAL PRIMARY KEY)
     * `room_name` (VARCHAR(255) UNIQUE NOT NULL)
     * ... other room details ...
 
-* **RoomMembers Table:**
-    * `id` (SERIAL PRIMARY KEY)
+* **RoomUsers table (many-to-many relationship):**
     * `room_id` (INTEGER REFERENCES Rooms(id))
     * `user_id` (INTEGER REFERENCES Users(id))
 
 
 ## 6. System Integration Patterns
 
-Currently, there are no explicit system integration patterns beyond the client-server interaction via WebSockets.  Future integrations could include:
+Currently, there are no explicit integration patterns.  Future integration could include:
 
 * **Authentication:** Integrate with an authentication service (e.g., OAuth 2.0) to secure user accounts.
-* **External Services:** Integrate with services for transcription, voice analysis, or other features.
+* **Message Queues:** Use a message queue (e.g., RabbitMQ, Kafka) to handle asynchronous tasks like recording voice data or sending notifications.
+* **Cloud Storage:** Integrate with cloud storage (e.g., AWS S3, Google Cloud Storage) to store recorded voice data.
 
 
 ## 7. Deployment
 
-The `docker-compose.yml` file indicates a Docker-based deployment strategy.  The `vercel.json` file suggests an attempt at deploying to Vercel, which is not ideal for a real-time application like this.  A more suitable deployment platform for a real-time application would be a cloud platform that supports WebSockets and scaling (e.g., AWS, Google Cloud, Heroku).
+The `docker-compose.yml` file suggests a Docker-based deployment.  The `vercel.json` file indicates an attempt at deploying to Vercel, which is not ideal for a real-time application like this.  A more suitable deployment platform would be a cloud-based solution optimized for real-time applications (e.g., AWS Elastic Beanstalk, Google Cloud Run, Heroku).
 
 
 ## 8. Recommendations
 
-* **Implement a persistent database:**  This is crucial for storing user data and room information.
-* **Implement user authentication:** Secure the application by requiring users to log in.
-* **Improve error handling:** Implement more robust error handling and logging.
-* **Add security measures:** Protect against common web vulnerabilities (e.g., XSS, CSRF).
-* **Refactor `compose-dev.yaml`:** This file is currently incorrect and should be removed or fixed.
-* **Use a production-ready deployment platform:**  Vercel is not suitable for this application. Consider using a platform optimized for real-time applications and scaling.
-* **Consider using a message queue:** For very high-volume scenarios, a message queue (e.g., Redis, RabbitMQ) could improve scalability and decouple components.
+* **Implement a persistent data store:**  Add a database to store user and room information.
+* **Improve error handling:** Implement more robust error handling to gracefully handle exceptions and provide informative error messages.
+* **Add authentication:** Integrate with an authentication service to secure user accounts.
+* **Implement robust logging:** Add detailed logging to aid in debugging and monitoring.
+* **Refactor `default_error_handler`:** Instead of stopping the server on error, log the error and potentially attempt to recover.
+* **Consider using a more suitable deployment platform:**  Choose a platform optimized for real-time applications.
+* **Add unit and integration tests:**  Write tests to ensure the application's functionality and stability.
+* **Optimize for scalability:**  Consider using load balancing and other techniques to handle a large number of concurrent users.
 
 
-This HLD provides a foundation for further development.  Detailed design specifications for each component and the database schema should be created before implementation.
+This HLD provides a foundation for further development.  More detailed design specifications will be needed as the project progresses.
